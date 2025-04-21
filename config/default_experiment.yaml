@@ -1,0 +1,49 @@
+# Default configuration for p-hacking experiment
+
+# Model settings
+analysis_model: "gpt-4o"
+judge_model: "gpt-4o"
+
+# Experiment parameters
+num_iterations: 10
+batch_size: 5
+n_samples: 100
+n_features: 10
+
+# Relationship parameters
+relationship_types:
+  - "quadratic"
+  - "interaction"
+  - "mediation"
+  - "temporal"
+  - "threshold"
+  - "cyclic"
+  - "exponential"
+
+relationship_strengths:
+  quadratic: 0.7
+  interaction: 0.6
+  mediation: 0.5
+  temporal: 0.8
+  threshold: 0.6
+  cyclic: 0.7
+  exponential: 0.6
+
+noise_levels:
+  quadratic: 0.3
+  interaction: 0.4
+  mediation: 0.3
+  temporal: 0.2
+  threshold: 0.3
+  cyclic: 0.3
+  exponential: 0.4
+
+# API settings
+api_retry_attempts: 3
+api_retry_delay: 1.0
+api_timeout: 30.0
+
+# Logging settings
+log_level: "INFO"
+log_rotation_size: 1048576  # 1MB
+log_backup_count: 5 

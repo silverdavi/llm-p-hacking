@@ -54,48 +54,6 @@ class LLMApi:
         self.call_count = 0
         self.last_response = ""
 
-    def call_model(self, prompt: str, timeout: Optional[float] = None, return_headers: bool = False) -> Union[str, Dict[str, Any]]:
-        """
-        Make API call with a simple string prompt.
-
-        Args:
-            prompt: Input prompt for the model as a string
-            timeout: Request timeout in seconds (optional)
-            return_headers: Whether to return response headers
-
-        Returns:
-            Model's response text or dictionary with response and headers
-
-        Raises:
-            Exception: If all retry attempts fail
-        """
-        messages = [{"role": "user", "content": prompt}]
-        return self._make_api_call(messages, timeout=timeout, return_headers=return_headers)
-
-    def call_structured_model(
-            self,
-            messages: List[Dict[str, str]],
-            response_format: Optional[Dict[str, str]] = None,
-            timeout: Optional[float] = None,
-            return_headers: bool = False
-    ) -> Union[str, Dict[str, Any]]:
-        """
-        Make API call with structured messages and optional response format.
-
-        Args:
-            messages: List of message objects with role and content
-            response_format: Optional response format specification (e.g., {"type": "json_object"})
-            timeout: Request timeout in seconds (optional)
-            return_headers: Whether to return response headers
-
-        Returns:
-            Model's response text or dictionary with response and headers
-
-        Raises:
-            Exception: If all retry attempts fail
-        """
-        return self._make_api_call(messages, response_format, timeout, return_headers)
-
     def _make_api_call(
             self,
             messages: List[Dict[str, str]],
@@ -151,14 +109,31 @@ class LLMApi:
                     timeout=timeout or 30
                 )
                 
+                # Log response status and headers for debugging
+                logger.debug(f"Response status: {response.status_code}")
+                logger.debug(f"Response headers: {dict(response.headers)}")
+                
+                # Check for successful response
+                if response.status_code != 200:
+                    error_msg = f"API returned status code {response.status_code}: {response.text}"
+                    logger.error(error_msg)
+                    raise Exception(error_msg)
+                
                 # Parse response
                 response_data = response.json()
+                
+                # Log response structure for debugging
+                logger.debug(f"Response data keys: {list(response_data.keys())}")
+                
+                # Handle potential missing or malformed response
+                if "choices" not in response_data or not response_data["choices"]:
+                    error_msg = "Invalid response format: missing choices"
+                    logger.error(error_msg)
+                    raise Exception(error_msg)
+                
                 self.last_response = response_data["choices"][0]["message"]["content"].strip()
                 
                 if return_headers:
-                    # Log headers for debugging
-                    logger.debug(f"Response headers: {dict(response.headers)}")
-                    
                     return {
                         "response": self.last_response,
                         "headers": {
@@ -172,22 +147,10 @@ class LLMApi:
                     }
                 return self.last_response
 
-            except Exception as e:
-                # Use exponential backoff for retry delay
-                backoff_delay = self.retry_delay * (2 ** attempt)
-                
-                # Log based on exception type for better diagnostics
-                if "timeout" in str(e).lower() or "timed out" in str(e).lower():
-                    logger.warning(f"API call timeout (attempt {attempt + 1}): {str(e)}")
-                elif "rate limit" in str(e).lower():
-                    logger.warning(f"API rate limit exceeded (attempt {attempt + 1}): {str(e)}")
-                    # Add extra delay for rate limiting
-                    backoff_delay = max(backoff_delay, 5)
-                else:
-                    logger.warning(f"API call attempt {attempt + 1} failed: {str(e)}")
-                
+            except httpx.TimeoutException as e:
+                logger.warning(f"API call timeout (attempt {attempt + 1}): {str(e)}")
                 if attempt < self.max_retries - 1:
-                    # Add a bit of randomness to avoid thundering herd
+                    backoff_delay = self.retry_delay * (2 ** attempt)
                     jitter = backoff_delay * 0.1 * (2 * time.time() % 1 - 0.5)
                     retry_time = backoff_delay + jitter
                     logger.info(f"Retrying request in {retry_time:.2f} seconds")
@@ -196,6 +159,67 @@ class LLMApi:
                     error_msg = f"All retry attempts failed: {str(e)}"
                     logger.error(error_msg)
                     raise Exception(error_msg)
+                    
+            except Exception as e:
+                # Log the full error for debugging
+                logger.error(f"API call error (attempt {attempt + 1}): {str(e)}")
+                logger.error(f"Error type: {type(e).__name__}")
+                if hasattr(e, 'response'):
+                    logger.error(f"Response status: {e.response.status_code}")
+                    logger.error(f"Response text: {e.response.text}")
+                
+                if attempt < self.max_retries - 1:
+                    backoff_delay = self.retry_delay * (2 ** attempt)
+                    jitter = backoff_delay * 0.1 * (2 * time.time() % 1 - 0.5)
+                    retry_time = backoff_delay + jitter
+                    logger.info(f"Retrying request in {retry_time:.2f} seconds")
+                    time.sleep(retry_time)
+                else:
+                    error_msg = f"All retry attempts failed: {str(e)}"
+                    logger.error(error_msg)
+                    raise Exception(error_msg)
+
+    def call_model(self, prompt: str, timeout: Optional[float] = None, return_headers: bool = False) -> Union[str, Dict[str, Any]]:
+        """
+        Make API call with a simple string prompt.
+
+        Args:
+            prompt: Input prompt for the model as a string
+            timeout: Request timeout in seconds (optional)
+            return_headers: Whether to return response headers
+
+        Returns:
+            Model's response text or dictionary with response and headers
+
+        Raises:
+            Exception: If all retry attempts fail
+        """
+        messages = [{"role": "user", "content": prompt}]
+        return self._make_api_call(messages, timeout=timeout, return_headers=return_headers)
+
+    def call_structured_model(
+            self,
+            messages: List[Dict[str, str]],
+            response_format: Optional[Dict[str, str]] = None,
+            timeout: Optional[float] = None,
+            return_headers: bool = False
+    ) -> Union[str, Dict[str, Any]]:
+        """
+        Make API call with structured messages and optional response format.
+
+        Args:
+            messages: List of message objects with role and content
+            response_format: Optional response format specification (e.g., {"type": "json_object"})
+            timeout: Request timeout in seconds (optional)
+            return_headers: Whether to return response headers
+
+        Returns:
+            Model's response text or dictionary with response and headers
+
+        Raises:
+            Exception: If all retry attempts fail
+        """
+        return self._make_api_call(messages, response_format, timeout, return_headers)
 
     def get_usage_stats(self) -> dict:
         """Return current usage statistics"""

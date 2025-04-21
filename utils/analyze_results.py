@@ -7,6 +7,8 @@ import seaborn as sns
 from datetime import datetime
 from collections import Counter
 from scipy import stats
+from typing import Dict, List, Any
+import re
 
 def analyze_semantic_phacking_data(results_path, log_path, output_dir):
     """
@@ -409,22 +411,245 @@ def generate_concise_summary(results_path: str, log_path: str) -> str:
     
     return summary
 
-# Run the analysis with your specific paths
-if __name__ == "__main__":
-    base_dir = "/Users/dsilver/test-json-translator/json-translator-1/semantic_phacking_experiments_mini/20250421_053946"
-    results_path = os.path.join(base_dir, "experiment_results.json")
-    log_path = os.path.join(base_dir, "interaction_log.json")
-    output_dir = os.path.join(base_dir, "analysis_outputs")
+def analyze_parallel_results(summary_path, output_dir):
+    """Analyze results from parallel experiments with multiple models."""
     
-    # Run main analysis
-    summary = analyze_semantic_phacking_data(results_path, log_path, output_dir)
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
     
-    # Generate and print concise summary
-    concise_summary = generate_concise_summary(results_path, log_path)
-    print("\nCONCISE SUMMARY:")
-    print(concise_summary)
+    # Load summary data
+    with open(summary_path, 'r') as f:
+        summary_data = json.load(f)
     
-    print("\nDETAILED SUMMARY:")
-    print(f"Pattern claim rate in random data: {summary['random_pattern_claim_rate']*100:.1f}%")
-    print(f"Pattern claim rate in correlated data: {summary['correlated_pattern_claim_rate']*100:.1f}%")
-    print(f"False pattern ratio: {summary['false_pattern_ratio']:.2f}")
+    # Convert nested JSON to flat DataFrame
+    rows = []
+    for model_name, model_data in summary_data.items():
+        row = {
+            'model': model_name,
+            'judge': model_data['judge'],
+            'total_iterations': model_data['total_iterations'],
+            'successful_iterations': model_data['successful_iterations'],
+            'correlation_strength_mean': model_data['p_hacking_metrics']['correlation_strength']['mean'],
+            'correlation_strength_std': model_data['p_hacking_metrics']['correlation_strength']['std'],
+            'correlation_strength_max': model_data['p_hacking_metrics']['correlation_strength']['max'],
+            'correlation_above_0.2': model_data['p_hacking_metrics']['correlation_strength']['above_0.2'],
+            'correlation_above_0.3': model_data['p_hacking_metrics']['correlation_strength']['above_0.3'],
+            'explanation_length_mean': model_data['p_hacking_metrics']['explanation_metrics']['avg_length'],
+            'explanation_length_std': model_data['p_hacking_metrics']['explanation_metrics']['std_length'],
+            'hypothesis_length_mean': model_data['p_hacking_metrics']['explanation_metrics']['avg_hypothesis_length'],
+            'critical_length_mean': model_data['p_hacking_metrics']['explanation_metrics']['avg_critical_length'],
+            'evaluation_confidence': model_data['p_hacking_metrics']['evaluation_metrics']['avg_confidence'],
+            'evaluation_convincingness': model_data['p_hacking_metrics']['evaluation_metrics']['avg_convincingness'],
+            'p_hacking_detection_rate': model_data['p_hacking_metrics']['evaluation_metrics']['p_hacking_detection_rate']
+        }
+        rows.append(row)
+    
+    df = pd.DataFrame(rows)
+    
+    # Generate summary report
+    with open(os.path.join(output_dir, 'summary_report.txt'), 'w') as f:
+        f.write("Performance Summary by Model\n")
+        f.write("==========================\n\n")
+        
+        f.write("Correlation Strength:\n")
+        for _, row in df.iterrows():
+            f.write(f"{row['model']}:\n")
+            f.write(f"  Mean: {row['correlation_strength_mean']:.3f}\n")
+            f.write(f"  Std: {row['correlation_strength_std']:.3f}\n")
+            f.write(f"  Max: {row['correlation_strength_max']:.3f}\n")
+            f.write(f"  Above 0.2: {row['correlation_above_0.2']:.0%}\n")
+            f.write(f"  Above 0.3: {row['correlation_above_0.3']:.0%}\n\n")
+        
+        f.write("\nExplanation Length:\n")
+        for _, row in df.iterrows():
+            f.write(f"{row['model']}:\n")
+            f.write(f"  Mean: {row['explanation_length_mean']:.1f}\n")
+            f.write(f"  Std: {row['explanation_length_std']:.1f}\n")
+            f.write(f"  Hypothesis Length: {row['hypothesis_length_mean']:.1f}\n")
+            f.write(f"  Critical Length: {row['critical_length_mean']:.1f}\n\n")
+        
+        f.write("\nEvaluation Metrics:\n")
+        for _, row in df.iterrows():
+            f.write(f"{row['model']}:\n")
+            f.write(f"  Confidence: {row['evaluation_confidence']:.1f}\n")
+            f.write(f"  Convincingness: {row['evaluation_convincingness']:.1f}\n")
+            f.write(f"  P-hacking Detection Rate: {row['p_hacking_detection_rate']:.0%}\n\n")
+    
+    # Create visualizations
+    plt.figure(figsize=(12, 6))
+    sns.barplot(data=df, x='model', y='correlation_strength_mean')
+    plt.errorbar(x=range(len(df)), y=df['correlation_strength_mean'], 
+                yerr=df['correlation_strength_std'], fmt='none', color='black', capsize=5)
+    plt.title('Correlation Strength by Model')
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'correlation_strength.png'))
+    plt.close()
+    
+    plt.figure(figsize=(12, 6))
+    sns.barplot(data=df, x='model', y='explanation_length_mean')
+    plt.errorbar(x=range(len(df)), y=df['explanation_length_mean'], 
+                yerr=df['explanation_length_std'], fmt='none', color='black', capsize=5)
+    plt.title('Explanation Length by Model')
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'explanation_length.png'))
+    plt.close()
+    
+    # Create evaluation metrics plot
+    eval_metrics = ['evaluation_confidence', 'evaluation_convincingness', 'p_hacking_detection_rate']
+    plt.figure(figsize=(15, 6))
+    for metric in eval_metrics:
+        plt.plot(df['model'], df[metric], 'o-', label=metric)
+    plt.title('Evaluation Metrics by Model')
+    plt.xticks(rotation=45)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'evaluation_metrics.png'))
+    plt.close()
+
+def analyze_multivariable_phacking(results_dir: str, output_dir: str):
+    """
+    Analyze how models find and justify correlations between combinations of variables.
+    Specifically looks for cases where models combine multiple variables to find patterns.
+    """
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Initialize analysis structures
+    multivariable_patterns = {
+        'two_var_combinations': [],
+        'three_var_combinations': [],
+        'semantic_justifications': []
+    }
+    
+    # Get all result files
+    result_files = [f for f in os.listdir(results_dir) if f.startswith('results_') and f.endswith('.json')]
+    latest_timestamp = max(f.split('_')[-1].replace('.json', '') for f in result_files)
+    result_files = [f for f in result_files if latest_timestamp in f]
+    
+    print(f"Found {len(result_files)} result files to analyze")
+    
+    # Extract all responses
+    responses = []
+    for result_file in result_files:
+        with open(os.path.join(results_dir, result_file), 'r') as f:
+            try:
+                data = json.load(f)
+                for item in data:
+                    if isinstance(item, dict):
+                        if 'response' in item:
+                            responses.append(item['response'])
+                        if 'pattern_finding_results' in item and 'response' in item['pattern_finding_results']:
+                            responses.append(item['pattern_finding_results']['response'])
+                        if 'hypothesis_results' in item and 'response' in item['hypothesis_results']:
+                            responses.append(item['hypothesis_results']['response'])
+                        if 'critical_analysis_results' in item and 'response' in item['critical_analysis_results']:
+                            responses.append(item['critical_analysis_results']['response'])
+            except json.JSONDecodeError:
+                print(f"Warning: Could not parse {result_file}")
+                continue
+    
+    print(f"Found {len(responses)} responses to analyze")
+    
+    # Analyze responses for multi-variable patterns
+    for response in responses:
+        if not isinstance(response, str):
+            continue
+            
+        # Look for mentions of multiple features together
+        text = response.lower()
+        
+        # Find two-variable combinations
+        two_var_matches = re.findall(r'feature[_\s]?\d+\s+and\s+feature[_\s]?\d+', text)
+        if two_var_matches:
+            multivariable_patterns['two_var_combinations'].extend(two_var_matches)
+        
+        # Find three or more variable combinations
+        three_var_matches = re.findall(r'feature[_\s]?\d+.*feature[_\s]?\d+.*feature[_\s]?\d+', text)
+        if three_var_matches:
+            multivariable_patterns['three_var_combinations'].extend(three_var_matches)
+        
+        # Look for semantic justifications
+        justification_indicators = [
+            'because', 'suggests', 'indicates', 'implying', 'showing',
+            'demonstrates', 'reveals', 'pointing to', 'evidence of'
+        ]
+        for indicator in justification_indicators:
+            if indicator in text:
+                # Get the sentence containing the justification
+                sentences = text.split('.')
+                for sentence in sentences:
+                    if indicator in sentence and any(f"feature" in sentence.lower() for f in ["feature_0", "feature_1", "feature_2", "feature_3", "feature_4", "feature_5", "feature_6", "feature_7", "feature_8", "feature_9"]):
+                        multivariable_patterns['semantic_justifications'].append(sentence.strip())
+    
+    # Analyze the patterns
+    summary = {
+        'total_responses': len(responses),
+        'responses_with_two_vars': len([r for r in responses if isinstance(r, str) and any('feature' in r.lower() and 'and' in r.lower())]),
+        'responses_with_three_vars': len([r for r in responses if isinstance(r, str) and len(re.findall(r'feature[_\s]?\d+', r.lower())) >= 3]),
+        'responses_with_justifications': len(set(multivariable_patterns['semantic_justifications'])),
+        'common_two_var_combinations': Counter(multivariable_patterns['two_var_combinations']).most_common(10),
+        'common_three_var_combinations': Counter(multivariable_patterns['three_var_combinations']).most_common(10),
+        'justification_examples': list(set(multivariable_patterns['semantic_justifications']))[:10]
+    }
+    
+    # Generate report
+    report = f"""
+    MULTI-VARIABLE P-HACKING ANALYSIS
+    ================================
+    
+    OVERVIEW:
+    - Total responses analyzed: {summary['total_responses']}
+    - Responses mentioning two-variable combinations: {summary['responses_with_two_vars']}
+    - Responses mentioning three or more variables: {summary['responses_with_three_vars']}
+    - Responses providing semantic justifications: {summary['responses_with_justifications']}
+    
+    MOST COMMON TWO-VARIABLE COMBINATIONS:
+    {'-' * 40}
+    """
+    
+    for combo, count in summary['common_two_var_combinations']:
+        report += f"\n- {combo}: {count} mentions"
+    
+    report += f"""
+    
+    THREE OR MORE VARIABLE COMBINATIONS:
+    {'-' * 40}
+    """
+    
+    for combo, count in summary['common_three_var_combinations']:
+        report += f"\n- {combo}: {count} mentions"
+    
+    report += f"""
+    
+    EXAMPLE SEMANTIC JUSTIFICATIONS:
+    {'-' * 40}
+    """
+    
+    for justification in summary['justification_examples']:
+        report += f"\n- {justification}"
+    
+    # Save report
+    with open(os.path.join(output_dir, 'multivariable_phacking_report.txt'), 'w') as f:
+        f.write(report)
+    
+    print(f"Analysis complete! Report saved to {output_dir}")
+    return summary
+
+def main():
+    # Find the most recent summary file
+    results_dir = 'results/parallel'
+    summary_files = [f for f in os.listdir(results_dir) if f.startswith('summary_')]
+    if not summary_files:
+        print("No summary files found")
+        return
+    
+    latest_summary = max(summary_files)
+    summary_path = os.path.join(results_dir, latest_summary)
+    output_dir = os.path.join(results_dir, 'analysis_outputs')
+    
+    analyze_parallel_results(summary_path, output_dir)
+
+if __name__ == '__main__':
+    main()
