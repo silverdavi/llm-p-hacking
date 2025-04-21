@@ -84,6 +84,8 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+.env.*
+!.env.example
 
 # Spyder project settings
 .spyderproject
@@ -103,11 +105,6 @@ venv.bak/
 experiments/
 results/
 
-# API Keys and secrets
-.env
-.env.*
-!.env.example
-
 # VSCode
 .vscode/
 
@@ -116,20 +113,8 @@ results/
 
 # Virtual Environment
 venv/
-ENV/
-env/
-.env
-.env.*
 
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-.DS_Store
-
-# Logs
-*.log
+# Local logs
 logs/
 experiment_logs/
 
